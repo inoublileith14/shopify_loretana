@@ -3,7 +3,42 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 
 let app: any;
 
+// CORS allowed origins
+const ALLOWED_ORIGINS = [
+  'https://loretana.com',
+  'https://www.loretana.com',
+  'http://localhost:3000',
+  'http://localhost:3001',
+];
+
+function setCorsHeaders(req: VercelRequest, res: VercelResponse) {
+  const origin = req.headers.origin as string | undefined;
+
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    // Allow requests with no origin (server-to-server)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return true;
+  }
+  return false;
+}
+
 export default async (req: VercelRequest, res: VercelResponse) => {
+  // Handle CORS preflight
+  if (setCorsHeaders(req, res)) {
+    return;
+  }
+
   if (!app) {
     try {
         let moduleImport: any = null;

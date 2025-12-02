@@ -10,6 +10,7 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     await app.init();
   }
 
-  // Use NestJS HTTP adapter to handle the request
-  return app.getHttpAdapter().getInstance()(req, res);
+  // Forward all requests to the NestJS app
+  const server = app.getHttpServer();
+  return server(req, res);
 };

@@ -294,7 +294,7 @@ export class CustomizerService {
   /**
    * Upload image with customization data
    * Saves two images: original and shaped/transformed version
-   * Checks if session ID exists in Shopify orders and generates a new one if needed
+   * If session folder already exists, reuse it; otherwise check for Shopify conflicts
    */
   async uploadSessionImage(
     sessionId: string,
@@ -331,29 +331,51 @@ export class CustomizerService {
         throw new BadRequestException('Only PNG and JPG files are allowed');
       }
 
-      // Check if session ID conflicts with existing Shopify orders
       const originalSessionId = sessionId;
+      let finalSessionId = sessionId;
+      let sessionIdChangeReason = '';
+      let sessionIdChanged = false;
+
+      // Step 1: Check if session ID conflicts with existing Shopify orders
       const sessionIdResult = await this.generateUniqueSessionId(sessionId);
-      const finalSessionId = sessionIdResult.sessionId;
-      const sessionIdChangeReason = sessionIdResult.reason;
-      const sessionIdChanged = originalSessionId !== finalSessionId;
+      finalSessionId = sessionIdResult.sessionId;
+      sessionIdChangeReason = sessionIdResult.reason;
+      sessionIdChanged = originalSessionId !== finalSessionId;
 
       if (sessionIdChanged) {
         this.logger.log(
-          `Session ID changed due to conflict. Original: ${originalSessionId}, Using: ${finalSessionId}. Reason: ${sessionIdChangeReason}`,
+          `Session ID conflict with Shopify orders. Original: ${originalSessionId}, Generated new: ${finalSessionId}. Reason: ${sessionIdChangeReason}`,
         );
       } else {
-        this.logger.log(
-          `Session ID validated: ${originalSessionId}. Reason: ${sessionIdChangeReason}`,
-        );
+        // Session ID is not in Shopify orders
+        // Step 2: Check if session folder already exists in storage
+        const folderPath = `customizer/${sessionId}`;
+        const { data: existingFiles, error: listError } =
+          await this.supabase.storage
+            .from('customizer-uploads')
+            .list(folderPath);
+
+        if (existingFiles && existingFiles.length > 0) {
+          // Session folder already exists, will reuse it and replace images
+          sessionIdChangeReason = `Session ID not in Shopify orders. Folder exists in storage, reusing session and replacing existing images.`;
+          this.logger.log(
+            `Session ID valid (not in Shopify orders). Reusing existing session folder: ${folderPath}`,
+          );
+        } else {
+          // No Shopify conflict and no existing storage folder - use normally
+          sessionIdChangeReason = `Session ID not in Shopify orders and no existing folder in storage. Using session ID normally for new upload.`;
+          this.logger.log(
+            `Session ID validated: ${originalSessionId}. No conflicts or existing storage.`,
+          );
+        }
       }
 
-      const folderPath = `customizer/${finalSessionId}`;
+      const finalFolderPath = `customizer/${finalSessionId}`;
       const originalFileName = 'original.png';
       const shapedFileName = `${customizationData.shape}.png`;
 
-      const originalFilePath = `${folderPath}/${originalFileName}`;
-      const shapedFilePath = `${folderPath}/${shapedFileName}`;
+      const originalFilePath = `${finalFolderPath}/${originalFileName}`;
+      const shapedFilePath = `${finalFolderPath}/${shapedFileName}`;
 
       this.logger.log(
         `Uploading customized image for session: ${finalSessionId} (shape: ${customizationData.shape})`,

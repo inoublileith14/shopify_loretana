@@ -93,7 +93,10 @@ export class QrController {
       if (sessionId) {
         try {
           // Fetch all orders from Shopify
-          const ordersResponse = await this.shopifyService.getOrders(250, 'any');
+          const ordersResponse = await this.shopifyService.getOrders(
+            250,
+            'any',
+          );
           const existingOrders = ordersResponse.orders || [];
           const usedSessionIds = new Set<string>();
           existingOrders.forEach((order: any) => {
@@ -104,15 +107,20 @@ export class QrController {
           if (usedSessionIds.has(sessionId)) {
             // Generate new sessionId
             const timestamp = Date.now().toString().slice(-4);
-            const randomSuffix = Math.random().toString(36).substring(2, 8).toUpperCase();
+            const randomSuffix = Math.random()
+              .toString(36)
+              .substring(2, 8)
+              .toUpperCase();
             finalSessionId = `${sessionId}_${timestamp}_${randomSuffix}`;
             sessionIdChanged = true;
             sessionIdReason = `Session ID conflict detected: "${sessionId}" is already used in existing orders. Generated new unique ID to avoid duplication.`;
           } else {
-            sessionIdReason = 'Session ID is available and not used in any orders';
+            sessionIdReason =
+              'Session ID is available and not used in any orders';
           }
         } catch (error) {
-          sessionIdReason = 'Could not verify with Shopify orders. Using original session ID.';
+          sessionIdReason =
+            'Could not verify with Shopify orders. Using original session ID.';
         }
       }
 
@@ -126,7 +134,11 @@ export class QrController {
         `QR save request for URL: ${url}, Session: ${finalSessionId}`,
       );
 
-      const result = await this.qrService.saveQrCode(url, finalSessionId, options);
+      const result = await this.qrService.saveQrCode(
+        url,
+        finalSessionId,
+        options,
+      );
 
       return {
         success: true,

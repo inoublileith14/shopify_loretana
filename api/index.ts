@@ -43,16 +43,22 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     try {
         let moduleImport: any = null;
 
-        // Import from the compiled dist output (files are at dist/app.module.js, not dist/src/app.module.js)
+        // Import from the compiled dist output
         try {
           // @ts-ignore - runtime-only dynamic import
-          moduleImport = await import('../dist/app.module.js');
+          moduleImport = await import('./dist/app.module.js');
         } catch (err) {
-          console.error('Failed to import AppModule from dist:', err);
-          throw new Error(
-            'Cannot find compiled AppModule. Ensure "npm run build" was executed before deployment. ' +
-            'Error: ' + (err instanceof Error ? err.message : String(err))
-          );
+          console.error('Failed to import AppModule from ./dist:', err);
+          try {
+            // Fallback: try from ../dist
+            moduleImport = await import('../dist/app.module.js');
+          } catch (fallbackErr) {
+            console.error('Failed to import AppModule from ../dist:', fallbackErr);
+            throw new Error(
+              'Cannot find compiled AppModule. Ensure "npm run build" was executed before deployment. ' +
+              'Error: ' + (err instanceof Error ? err.message : String(err))
+            );
+          }
         }
 
         const { AppModule } = moduleImport;

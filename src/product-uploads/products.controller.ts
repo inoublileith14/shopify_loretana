@@ -57,10 +57,7 @@ export class ProductsController {
   ) {
     try {
       if (!file) {
-        throw new HttpException(
-          'File is required',
-          HttpStatus.BAD_REQUEST,
-        );
+        throw new HttpException('File is required', HttpStatus.BAD_REQUEST);
       }
 
       const allowedMimes = ['image/png', 'image/jpeg', 'image/jpg'];
@@ -78,7 +75,6 @@ export class ProductsController {
         );
       }
 
-
       // Step 0: Check Shopify orders for sessionId conflict
       let sessionIdChanged = false;
       let sessionIdReason = '';
@@ -86,7 +82,10 @@ export class ProductsController {
       if (sessionId) {
         try {
           // Fetch all orders from Shopify
-          const ordersResponse = await this.shopifyService.getOrders(250, 'any');
+          const ordersResponse = await this.shopifyService.getOrders(
+            250,
+            'any',
+          );
           const existingOrders = ordersResponse.orders || [];
           const usedSessionIds = new Set<string>();
           existingOrders.forEach((order: any) => {
@@ -97,15 +96,20 @@ export class ProductsController {
           if (usedSessionIds.has(sessionId)) {
             // Generate new sessionId
             const timestamp = Date.now().toString().slice(-4);
-            const randomSuffix = Math.random().toString(36).substring(2, 8).toUpperCase();
+            const randomSuffix = Math.random()
+              .toString(36)
+              .substring(2, 8)
+              .toUpperCase();
             finalSessionId = `${sessionId}_${timestamp}_${randomSuffix}`;
             sessionIdChanged = true;
             sessionIdReason = `Session ID conflict detected: "${sessionId}" is already used in existing orders. Generated new unique ID to avoid duplication.`;
           } else {
-            sessionIdReason = 'Session ID is available and not used in any orders';
+            sessionIdReason =
+              'Session ID is available and not used in any orders';
           }
         } catch (error) {
-          sessionIdReason = 'Could not verify with Shopify orders. Using original session ID.';
+          sessionIdReason =
+            'Could not verify with Shopify orders. Using original session ID.';
         }
       }
 
@@ -138,7 +142,8 @@ export class ProductsController {
 
       // Step 1.5: If sessionId is provided, check for existing uploads and delete old QR code
       if (finalSessionId) {
-        const existingUploads = await this.uploadsService.getUploadsBySession(finalSessionId);
+        const existingUploads =
+          await this.uploadsService.getUploadsBySession(finalSessionId);
         for (const upload of existingUploads) {
           // Remove old QR code from storage if exists
           const qrFilePath = `products/${upload.code}/qr_code.png`;
@@ -149,7 +154,11 @@ export class ProductsController {
       }
 
       // Step 2: Upload original image file (no customization or scaling)
-      const fileExtension = file.originalname.endsWith('.jpg') || file.originalname.endsWith('.jpeg') ? 'jpg' : 'png';
+      const fileExtension =
+        file.originalname.endsWith('.jpg') ||
+        file.originalname.endsWith('.jpeg')
+          ? 'jpg'
+          : 'png';
       const fileName = `${shortCode}.${fileExtension}`;
       const filePath = `products/${shortCode}/${fileName}`;
 
@@ -226,7 +235,9 @@ export class ProductsController {
       };
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to upload product image';
+        error instanceof Error
+          ? error.message
+          : 'Failed to upload product image';
       this.logger.error(`Product upload error: ${errorMessage}`, error);
 
       if (error instanceof HttpException) {
@@ -253,10 +264,7 @@ export class ProductsController {
       const uploadRecord = await this.uploadsService.getUploadByCode(code);
 
       if (!uploadRecord) {
-        throw new HttpException(
-          'Product not found',
-          HttpStatus.NOT_FOUND,
-        );
+        throw new HttpException('Product not found', HttpStatus.NOT_FOUND);
       }
 
       return {
@@ -307,7 +315,10 @@ export class ProductsController {
       // Delete image files from storage
       const { error: deleteError } = await this.supabase.storage
         .from('customizer-uploads')
-        .remove([`products/${code}/${code}.png`, `products/${code}/qr_code.png`]);
+        .remove([
+          `products/${code}/${code}.png`,
+          `products/${code}/qr_code.png`,
+        ]);
 
       if (deleteError) {
         this.logger.warn(

@@ -30,7 +30,8 @@ interface ShopifyOrdersResponse {
 @Injectable()
 export class ShopifyService {
   private readonly logger = new Logger(ShopifyService.name);
-  private readonly defaultShopDomain = process.env.SHOPIFY_STORE_DOMAIN || 'loretana.com';
+  private readonly defaultShopDomain =
+    process.env.SHOPIFY_STORE_DOMAIN || 'loretana.com';
   private readonly defaultAccessToken = process.env.SHOPIFY_ACCESS_TOKEN || '';
 
   /**
@@ -45,7 +46,12 @@ export class ShopifyService {
     status: string = 'any',
     shopDomain?: string,
     accessToken?: string,
-  ): Promise<{ success: boolean; orders: ShopifyOrder[]; total: number; message: string }> {
+  ): Promise<{
+    success: boolean;
+    orders: ShopifyOrder[];
+    total: number;
+    message: string;
+  }> {
     try {
       const domain = shopDomain || this.defaultShopDomain;
       const token = accessToken || this.defaultAccessToken;
@@ -74,7 +80,9 @@ export class ShopifyService {
 
       if (!response.ok) {
         const errorBody = await response.text();
-        this.logger.error(`Shopify API error (${response.status}): ${errorBody}`);
+        this.logger.error(
+          `Shopify API error (${response.status}): ${errorBody}`,
+        );
         throw new BadRequestException(
           `Failed to fetch orders from Shopify: ${response.statusText}`,
         );
@@ -82,7 +90,9 @@ export class ShopifyService {
 
       const data: ShopifyOrdersResponse = await response.json();
 
-      this.logger.log(`Successfully fetched ${data.orders.length} orders from Shopify store: ${domain}`);
+      this.logger.log(
+        `Successfully fetched ${data.orders.length} orders from Shopify store: ${domain}`,
+      );
 
       return {
         success: true,
@@ -115,12 +125,16 @@ export class ShopifyService {
       const token = accessToken || this.defaultAccessToken;
 
       if (!domain || !token || !orderId) {
-        throw new BadRequestException('Shopify credentials and order ID are required.');
+        throw new BadRequestException(
+          'Shopify credentials and order ID are required.',
+        );
       }
 
       const apiUrl = `https://${domain}/admin/api/2024-01/orders/${orderId}.json`;
 
-      this.logger.log(`Fetching order ${orderId} from Shopify store: ${domain}`);
+      this.logger.log(
+        `Fetching order ${orderId} from Shopify store: ${domain}`,
+      );
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -132,7 +146,9 @@ export class ShopifyService {
 
       if (!response.ok) {
         const errorBody = await response.text();
-        this.logger.error(`Shopify API error (${response.status}): ${errorBody}`);
+        this.logger.error(
+          `Shopify API error (${response.status}): ${errorBody}`,
+        );
         throw new BadRequestException(
           `Failed to fetch order from Shopify: ${response.statusText}`,
         );
@@ -191,7 +207,9 @@ export class ShopifyService {
 
       if (!response.ok) {
         const errorBody = await response.text();
-        this.logger.error(`Shopify API error (${response.status}): ${errorBody}`);
+        this.logger.error(
+          `Shopify API error (${response.status}): ${errorBody}`,
+        );
         throw new BadRequestException(
           `Failed to fetch order count from Shopify: ${response.statusText}`,
         );

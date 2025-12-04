@@ -10,7 +10,7 @@ export class ShopifyController {
   /**
    * Get orders from Shopify store
    * GET /shopify/orders?limit=50&status=any
-   * 
+   *
    * Uses credentials from environment variables (SHOPIFY_STORE_DOMAIN, SHOPIFY_ACCESS_TOKEN)
    *
    * Query Parameters (all optional):

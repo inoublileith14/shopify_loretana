@@ -69,7 +69,9 @@ export class ProductUploadsService {
     }
 
     if (!imageUrl || typeof imageUrl !== 'string') {
-      throw new BadRequestException('Image URL is required and must be a string');
+      throw new BadRequestException(
+        'Image URL is required and must be a string',
+      );
     }
 
     try {
@@ -130,7 +132,9 @@ export class ProductUploadsService {
       };
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to create upload record';
+        error instanceof Error
+          ? error.message
+          : 'Failed to create upload record';
       this.logger.error(`Error creating upload record:`, error);
       if (error instanceof BadRequestException) {
         throw error;
@@ -144,9 +148,7 @@ export class ProductUploadsService {
    */
   async getUploadByCode(code: string): Promise<UploadRecord | null> {
     if (!this.supabase) {
-      throw new BadRequestException(
-        'Supabase service is not configured.',
-      );
+      throw new BadRequestException('Supabase service is not configured.');
     }
 
     if (!code || typeof code !== 'string') {
@@ -187,7 +189,9 @@ export class ProductUploadsService {
       };
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to retrieve upload record';
+        error instanceof Error
+          ? error.message
+          : 'Failed to retrieve upload record';
       this.logger.error(`Error retrieving upload record:`, error);
       throw new BadRequestException(errorMessage);
     }
@@ -202,9 +206,7 @@ export class ProductUploadsService {
     shapedImageUrl?: string,
   ): Promise<void> {
     if (!this.supabase) {
-      throw new BadRequestException(
-        'Supabase service is not configured.',
-      );
+      throw new BadRequestException('Supabase service is not configured.');
     }
 
     try {
@@ -230,7 +232,9 @@ export class ProductUploadsService {
       this.logger.log(`Updated upload record images for code: ${code}`);
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to update upload record';
+        error instanceof Error
+          ? error.message
+          : 'Failed to update upload record';
       this.logger.error(`Error updating upload record:`, error);
       if (error instanceof BadRequestException) {
         throw error;
@@ -244,9 +248,7 @@ export class ProductUploadsService {
    */
   async getUploadsBySession(sessionId: string): Promise<UploadRecord[]> {
     if (!this.supabase) {
-      throw new BadRequestException(
-        'Supabase service is not configured.',
-      );
+      throw new BadRequestException('Supabase service is not configured.');
     }
 
     if (!sessionId || typeof sessionId !== 'string') {
@@ -284,7 +286,9 @@ export class ProductUploadsService {
       }));
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to retrieve upload records';
+        error instanceof Error
+          ? error.message
+          : 'Failed to retrieve upload records';
       this.logger.error(`Error retrieving upload records:`, error);
       throw new BadRequestException(errorMessage);
     }
@@ -295,9 +299,7 @@ export class ProductUploadsService {
    */
   async deleteUpload(code: string): Promise<void> {
     if (!this.supabase) {
-      throw new BadRequestException(
-        'Supabase service is not configured.',
-      );
+      throw new BadRequestException('Supabase service is not configured.');
     }
 
     try {
@@ -315,7 +317,9 @@ export class ProductUploadsService {
       this.logger.log(`Deleted upload record for code: ${code}`);
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to delete upload record';
+        error instanceof Error
+          ? error.message
+          : 'Failed to delete upload record';
       this.logger.error(`Error deleting upload record:`, error);
       if (error instanceof BadRequestException) {
         throw error;

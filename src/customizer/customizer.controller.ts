@@ -34,7 +34,9 @@ export class CustomizerController {
    * - accessToken (optional): Shopify access token
    */
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
   async uploadImage(
     @UploadedFile() file: Express.Multer.File,
     @Body()
@@ -52,7 +54,10 @@ export class CustomizerController {
       this.logger.log(`Upload request received for session: ${body.session}`);
 
       if (!body.session) {
-        throw new HttpException('Session ID is required', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'Session ID is required',
+          HttpStatus.BAD_REQUEST,
+        );
       }
 
       if (!body.x || !body.y || !body.zoom || !body.shape) {
@@ -151,7 +156,8 @@ export class CustomizerController {
     try {
       this.logger.log(`Session info request for: ${sessionId}`);
 
-      const sessionInfo = await this.customizerService.getSessionInfo(sessionId);
+      const sessionInfo =
+        await this.customizerService.getSessionInfo(sessionId);
 
       return {
         statusCode: HttpStatus.OK,
@@ -165,7 +171,9 @@ export class CustomizerController {
         throw error;
       }
       throw new HttpException(
-        error instanceof Error ? error.message : 'Failed to retrieve session info',
+        error instanceof Error
+          ? error.message
+          : 'Failed to retrieve session info',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

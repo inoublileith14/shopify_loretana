@@ -22,20 +22,23 @@ export class EmailController {
   // Limits (bytes) - configurable via env vars
   // Default per-file: 10 MB, default total: 20 MB
   private static readonly PER_FILE_LIMIT: number =
-    parseInt(process.env.ATTACHMENT_MAX_FILE_SIZE || '', 10) || 10 * 1024 * 1024;
+    parseInt(process.env.ATTACHMENT_MAX_FILE_SIZE || '', 10) ||
+    10 * 1024 * 1024;
   private static readonly TOTAL_ATTACHMENTS_LIMIT: number =
     parseInt(process.env.ATTACHMENTS_TOTAL_MAX || '', 10) || 20 * 1024 * 1024;
 
   @Post('test-upload')
-  @UseInterceptors(FilesInterceptor('attachments', 10, { limits: { fileSize: EmailController.PER_FILE_LIMIT } }))
-  async testUpload(
-    @UploadedFiles() files: Express.Multer.File[] = [],
-  ) {
+  @UseInterceptors(
+    FilesInterceptor('attachments', 10, {
+      limits: { fileSize: EmailController.PER_FILE_LIMIT },
+    }),
+  )
+  async testUpload(@UploadedFiles() files: Express.Multer.File[] = []) {
     this.logger.log(`Test endpoint received ${files.length} file(s)`);
-    
+
     return {
       filesReceived: files.length,
-      files: files.map(f => ({
+      files: files.map((f) => ({
         originalname: f.originalname,
         size: f.size,
         mimetype: f.mimetype,
@@ -56,19 +59,30 @@ export class EmailController {
         </body>
       </html>`;
 
-    const result = await this.emailService.sendEmail(to, subject, 'Fallback text', html, [], undefined);
+    const result = await this.emailService.sendEmail(
+      to,
+      subject,
+      'Fallback text',
+      html,
+      [],
+      undefined,
+    );
     return { success: true, messageId: result.messageId };
   }
 
   @Post('send')
-  @UseInterceptors(FilesInterceptor('attachments', 10, { limits: { fileSize: EmailController.PER_FILE_LIMIT } }))
+  @UseInterceptors(
+    FilesInterceptor('attachments', 10, {
+      limits: { fileSize: EmailController.PER_FILE_LIMIT },
+    }),
+  )
   async sendEmail(
     @Body() sendEmailDto: SendEmailDto,
     @UploadedFiles() files: Express.Multer.File[] = [],
   ) {
     try {
       this.logger.log(`Received ${files.length} file(s) for email`);
-      
+
       // Log detailed file info
       if (files && files.length > 0) {
         files.forEach((file, index) => {
@@ -79,7 +93,12 @@ export class EmailController {
       }
 
       // Map uploaded files to attachment format
-      const attachments: Array<{ filename: string; content?: Buffer; contentType?: string; path?: string }> = files.map((file: Express.Multer.File) => {
+      const attachments: Array<{
+        filename: string;
+        content?: Buffer;
+        contentType?: string;
+        path?: string;
+      }> = files.map((file: Express.Multer.File) => {
         this.logger.debug(
           `Processing file: ${file.originalname} (${file.size} bytes, ${file.mimetype})`,
         );
@@ -109,37 +128,35 @@ export class EmailController {
         }
       }
 
-      this.logger.log(
-        `Total attachments to send: ${attachments.length}`,
-      );
+      this.logger.log(`Total attachments to send: ${attachments.length}`);
 
       // If attachments are provided in DTO (file paths or base64), normalize and include them too
       if (sendEmailDto.attachments && Array.isArray(sendEmailDto.attachments)) {
         const dtoAttachments = await Promise.all(
           sendEmailDto.attachments.map(async (att) => {
             // If content is provided (e.g., base64 string or buffer), normalize to Buffer
-                if (att.content !== undefined && att.content !== null) {
-                  const contentBuffer =
-                    typeof att.content === 'string'
-                      ? // assume base64 for binary content; callers should provide base64 strings for binaries
-                        Buffer.from(att.content, 'base64')
-                      : (att.content as Buffer);
-                  return {
-                    filename: att.filename,
-                    content: contentBuffer,
-                    contentType: att.contentType || 'application/octet-stream',
-                  };
-                }
+            if (att.content !== undefined && att.content !== null) {
+              const contentBuffer =
+                typeof att.content === 'string'
+                  ? // assume base64 for binary content; callers should provide base64 strings for binaries
+                    Buffer.from(att.content, 'base64')
+                  : att.content;
+              return {
+                filename: att.filename,
+                content: contentBuffer,
+                contentType: att.contentType || 'application/octet-stream',
+              };
+            }
 
             // If a file path is provided, read the file into a buffer
-                if (att.path) {
-                  const buffer = await fsPromises.readFile(att.path);
-                  return {
-                    filename: att.filename,
-                    content: buffer,
-                    contentType: att.contentType || 'application/octet-stream',
-                  };
-                }
+            if (att.path) {
+              const buffer = await fsPromises.readFile(att.path);
+              return {
+                filename: att.filename,
+                content: buffer,
+                contentType: att.contentType || 'application/octet-stream',
+              };
+            }
 
             // If neither content nor path provided, throw a clear error
             throw new HttpException(
@@ -156,11 +173,15 @@ export class EmailController {
       let totalBytes = 0;
       for (const a of attachments) {
         if (a.content) {
-          totalBytes += Buffer.isBuffer(a.content) ? a.content.length : Buffer.byteLength(String(a.content));
+          totalBytes += Buffer.isBuffer(a.content)
+            ? a.content.length
+            : Buffer.byteLength(String(a.content));
         }
       }
 
-      this.logger.log(`Total attachments size: ${totalBytes} bytes (${formatBytes(totalBytes)})`);
+      this.logger.log(
+        `Total attachments size: ${totalBytes} bytes (${formatBytes(totalBytes)})`,
+      );
 
       if (totalBytes > EmailController.TOTAL_ATTACHMENTS_LIMIT) {
         throw new HttpException(
@@ -169,7 +190,9 @@ export class EmailController {
         );
       }
 
-      this.logger.log(`Sending email with ${attachments.length} total attachment(s) to ${sendEmailDto.to}`);
+      this.logger.log(
+        `Sending email with ${attachments.length} total attachment(s) to ${sendEmailDto.to}`,
+      );
 
       const result = await this.emailService.sendEmail(
         sendEmailDto.to || 'inoublileith6@gmail.com',

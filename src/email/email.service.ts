@@ -2,12 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const nodemailer = require('nodemailer');
 // Use SendGrid as an optional fallback for environments where SMTP creds are not provided
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+
 const sgMail = require('@sendgrid/mail');
 // Use MailComposer to build a raw message with explicit nested MIME parts
 // This helps ensure multipart/alternative (text+html) is nested inside
 // multipart/mixed when attachments are present so clients render HTML first.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+
 const MailComposer = require('nodemailer/lib/mail-composer');
 
 interface AttachmentConfig {
@@ -37,9 +37,14 @@ export class EmailService {
       try {
         sgMail.setApiKey(process.env.SENDGRID_API_KEY);
         this.useSendGrid = true;
-        this.logger.log('Using SendGrid for sending emails (SENDGRID_API_KEY detected)');
+        this.logger.log(
+          'Using SendGrid for sending emails (SENDGRID_API_KEY detected)',
+        );
       } catch (err) {
-        this.logger.warn('Failed to initialize SendGrid client, will attempt SMTP if configured', err);
+        this.logger.warn(
+          'Failed to initialize SendGrid client, will attempt SMTP if configured',
+          err,
+        );
         this.useSendGrid = false;
       }
     }
@@ -48,7 +53,9 @@ export class EmailService {
     if (!this.useSendGrid) {
       const smtpPass = process.env.EMAIL_PASSWORD || '';
       if (!smtpPass) {
-        this.logger.warn('EMAIL_PASSWORD is not set. SMTP (Gmail) auth will likely fail. Consider setting EMAIL_PASSWORD (app password) or providing SENDGRID_API_KEY for SendGrid.');
+        this.logger.warn(
+          'EMAIL_PASSWORD is not set. SMTP (Gmail) auth will likely fail. Consider setting EMAIL_PASSWORD (app password) or providing SENDGRID_API_KEY for SendGrid.',
+        );
       }
 
       // For Gmail, use App Passwords if 2FA is enabled
@@ -84,7 +91,8 @@ export class EmailService {
     const timestamp = new Date().toLocaleString();
     const year = new Date().getFullYear();
     // Use a public URL or convert to base64
-    const logoUrl = 'https://raw.githubusercontent.com/yourusername/your-repo/main/logo.png';
+    const logoUrl =
+      'https://raw.githubusercontent.com/yourusername/your-repo/main/logo.png';
 
     return `<html>
 <head>
@@ -194,7 +202,8 @@ export class EmailService {
       }
 
       // Build formatted HTML email if custom HTML not provided
-      const formattedHtml = html || this.buildEmailTemplate(to, text, senderEmail);
+      const formattedHtml =
+        html || this.buildEmailTemplate(to, text, senderEmail);
 
       // Prepare all attachments - user attachments ONLY (logo will be inline)
       const allAttachments: any[] = [];
@@ -202,9 +211,8 @@ export class EmailService {
       // Add user-provided attachments first
       if (attachments && Array.isArray(attachments) && attachments.length > 0) {
         this.logger.log(`Processing ${attachments.length} user attachment(s)`);
-        
+
         for (const att of attachments) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const attachment: any = {
             filename: att.filename,
           };
@@ -212,10 +220,14 @@ export class EmailService {
           // Use content if available, otherwise use path
           if (att.content) {
             attachment.content = att.content;
-            this.logger.log(`Added user attachment: ${att.filename} (${att.content instanceof Buffer ? att.content.length : 0} bytes)`);
+            this.logger.log(
+              `Added user attachment: ${att.filename} (${att.content instanceof Buffer ? att.content.length : 0} bytes)`,
+            );
           } else if (att.path) {
             attachment.path = att.path;
-            this.logger.log(`Added user attachment: ${att.filename} (from path)`);
+            this.logger.log(
+              `Added user attachment: ${att.filename} (from path)`,
+            );
           }
 
           if (att.contentType) {
@@ -248,7 +260,9 @@ export class EmailService {
       } as const;
 
       this.logger.log(`Sending email to ${to} with HTML template`);
-      this.logger.debug(`Attachments details: ${JSON.stringify(allAttachments.map(a => ({ filename: a.filename, hasCid: !!a.cid, hasContent: !!a.content, hasPath: !!a.path })))}`);
+      this.logger.debug(
+        `Attachments details: ${JSON.stringify(allAttachments.map((a) => ({ filename: a.filename, hasCid: !!a.cid, hasContent: !!a.content, hasPath: !!a.path })))}`,
+      );
 
       // Build a MailComposer message to force a nested MIME structure.
       // When attachments are present, MailComposer will create a
@@ -276,7 +290,11 @@ export class EmailService {
       // If SendGrid is configured, use it instead of raw SMTP
       if (this.useSendGrid) {
         const sgAttachments = allAttachments.map((a) => ({
-          content: a.content ? (Buffer.isBuffer(a.content) ? a.content.toString('base64') : Buffer.from(String(a.content)).toString('base64')) : undefined,
+          content: a.content
+            ? Buffer.isBuffer(a.content)
+              ? a.content.toString('base64')
+              : Buffer.from(String(a.content)).toString('base64')
+            : undefined,
           filename: a.filename,
           type: a.contentType,
           disposition: 'attachment',
@@ -291,17 +309,25 @@ export class EmailService {
           attachments: sgAttachments,
         };
 
-        this.logger.debug('Sending email via SendGrid', { to, subject, attachments: sgAttachments.length });
+        this.logger.debug('Sending email via SendGrid', {
+          to,
+          subject,
+          attachments: sgAttachments.length,
+        });
 
         const response = await sgMail.send(msg);
         // SendGrid returns an array of responses for some versions
         const first = Array.isArray(response) ? response[0] : response;
 
-        this.logger.log(`Email sent via SendGrid from ${senderEmail || this.senderEmail} to ${to}`);
+        this.logger.log(
+          `Email sent via SendGrid from ${senderEmail || this.senderEmail} to ${to}`,
+        );
 
         return {
-          messageId: first && first.headers ? (first.headers['x-message-id'] || '') : '',
-          response: first && first.statusCode ? String(first.statusCode) : undefined,
+          messageId:
+            first && first.headers ? first.headers['x-message-id'] || '' : '',
+          response:
+            first && first.statusCode ? String(first.statusCode) : undefined,
         };
       }
 
@@ -310,12 +336,19 @@ export class EmailService {
       const envelope = { from: senderEmail || this.senderEmail, to };
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const info: any = await this.transporter.sendMail({ envelope, raw: rawMessage });
+      const info: any = await this.transporter.sendMail({
+        envelope,
+        raw: rawMessage,
+      });
 
       // Log transport response for debugging (accepted/rejected/envelope)
-      this.logger.debug(`SMTP info: ${JSON.stringify({ messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, response: info.response })}`);
+      this.logger.debug(
+        `SMTP info: ${JSON.stringify({ messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, response: info.response })}`,
+      );
 
-      this.logger.log(`Email sent successfully from ${senderEmail || this.senderEmail} to ${to} with ${allAttachments.length} total attachment(s)`);
+      this.logger.log(
+        `Email sent successfully from ${senderEmail || this.senderEmail} to ${to} with ${allAttachments.length} total attachment(s)`,
+      );
 
       return {
         // messageId may be present depending on transport

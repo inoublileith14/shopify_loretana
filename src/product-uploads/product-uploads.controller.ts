@@ -54,7 +54,9 @@ export class ProductUploadsController {
       };
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to create upload record';
+        error instanceof Error
+          ? error.message
+          : 'Failed to create upload record';
       this.logger.error(`Upload creation error: ${errorMessage}`, error);
 
       if (error instanceof HttpException) {
@@ -93,7 +95,9 @@ export class ProductUploadsController {
       };
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to retrieve upload record';
+        error instanceof Error
+          ? error.message
+          : 'Failed to retrieve upload record';
       this.logger.error(`Upload retrieval error: ${errorMessage}`, error);
 
       if (error instanceof HttpException) {
@@ -117,9 +121,8 @@ export class ProductUploadsController {
         );
       }
 
-      const uploadRecords = await this.uploadsService.getUploadsBySession(
-        sessionId,
-      );
+      const uploadRecords =
+        await this.uploadsService.getUploadsBySession(sessionId);
 
       return {
         success: true,
@@ -128,8 +131,13 @@ export class ProductUploadsController {
       };
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to retrieve upload records';
-      this.logger.error(`Session uploads retrieval error: ${errorMessage}`, error);
+        error instanceof Error
+          ? error.message
+          : 'Failed to retrieve upload records';
+      this.logger.error(
+        `Session uploads retrieval error: ${errorMessage}`,
+        error,
+      );
 
       if (error instanceof HttpException) {
         throw error;
@@ -169,7 +177,9 @@ export class ProductUploadsController {
       };
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to update upload record';
+        error instanceof Error
+          ? error.message
+          : 'Failed to update upload record';
       this.logger.error(`Upload update error: ${errorMessage}`, error);
 
       if (error instanceof HttpException) {
@@ -202,7 +212,9 @@ export class ProductUploadsController {
       };
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Failed to delete upload record';
+        error instanceof Error
+          ? error.message
+          : 'Failed to delete upload record';
       this.logger.error(`Upload deletion error: ${errorMessage}`, error);
 
       if (error instanceof HttpException) {

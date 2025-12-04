@@ -25,7 +25,8 @@ export class CustomizerService {
   private initializeSupabase(): void {
     try {
       const supabaseUrl = process.env.SUPABASE_URL;
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+      const supabaseKey =
+        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
       if (!supabaseUrl || !supabaseKey) {
         throw new Error(
@@ -78,21 +79,30 @@ export class CustomizerService {
       while (usedSessionIds.has(newSessionId) && counter < maxAttempts) {
         // Generate with timestamp and random suffix
         const timestamp = Date.now().toString().slice(-4);
-        const randomSuffix = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const randomSuffix = Math.random()
+          .toString(36)
+          .substring(2, 8)
+          .toUpperCase();
         newSessionId = `${baseSessionId}_${timestamp}_${randomSuffix}`;
         counter++;
       }
 
-      this.logger.log(`Session ID conflict detected. Original: ${baseSessionId}, New: ${newSessionId}`);
+      this.logger.log(
+        `Session ID conflict detected. Original: ${baseSessionId}, New: ${newSessionId}`,
+      );
       return {
         sessionId: newSessionId,
         reason: `Session ID conflict detected: "${baseSessionId}" is already used in existing orders. Generated new unique ID to avoid duplication.`,
       };
     } catch (error) {
-      this.logger.warn('Could not check Shopify orders for session ID conflicts, using original ID', error);
+      this.logger.warn(
+        'Could not check Shopify orders for session ID conflicts, using original ID',
+        error,
+      );
       return {
         sessionId: baseSessionId,
-        reason: 'Could not verify with Shopify orders. Using original session ID.',
+        reason:
+          'Could not verify with Shopify orders. Using original session ID.',
       };
     }
   }
@@ -330,7 +340,9 @@ export class CustomizerService {
           `Session ID changed due to conflict. Original: ${originalSessionId}, Using: ${finalSessionId}. Reason: ${sessionIdChangeReason}`,
         );
       } else {
-        this.logger.log(`Session ID validated: ${originalSessionId}. Reason: ${sessionIdChangeReason}`);
+        this.logger.log(
+          `Session ID validated: ${originalSessionId}. Reason: ${sessionIdChangeReason}`,
+        );
       }
 
       const folderPath = `customizer/${finalSessionId}`;
@@ -478,7 +490,9 @@ export class CustomizerService {
         throw new BadRequestException('Failed to delete session files');
       }
 
-      this.logger.log(`Deleted ${files.length} files from session: ${sessionId}`);
+      this.logger.log(
+        `Deleted ${files.length} files from session: ${sessionId}`,
+      );
 
       return {
         success: true,

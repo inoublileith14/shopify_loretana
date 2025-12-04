@@ -8,7 +8,13 @@ import { ShopifyModule } from './shopify/shopify.module';
 import { ProductUploadsModule } from './product-uploads/product-uploads.module';
 
 @Module({
-  imports: [QrModule, EmailModule, CustomizerModule, ShopifyModule, ProductUploadsModule],
+  imports: [
+    QrModule,
+    EmailModule,
+    CustomizerModule,
+    ShopifyModule,
+    ProductUploadsModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

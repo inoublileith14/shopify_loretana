@@ -60,3 +60,5 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .vercel
 .env*.local
+google-drive-service-account.json
+public/google-drive-credentials.json

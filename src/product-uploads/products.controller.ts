@@ -75,81 +75,64 @@ export class ProductsController {
         );
       }
 
-      // Step 0: Check Shopify orders for sessionId conflict
-      let sessionIdChanged = false;
-      let sessionIdReason = '';
-      let finalSessionId = sessionId;
+      // Step 0: Check if sessionId already exists in database
+      let isNewSession = true;
+      let existingSessionCode: string | null = null;
+      let sessionUpdateReason = '';
+
       if (sessionId) {
-        try {
-          // Fetch all orders from Shopify
-          const ordersResponse = await this.shopifyService.getOrders(
-            250,
-            'any',
-          );
-          const existingOrders = ordersResponse.orders || [];
-          const usedSessionIds = new Set<string>();
-          existingOrders.forEach((order: any) => {
-            if (order.note && order.note.includes(sessionId)) {
-              usedSessionIds.add(sessionId);
-            }
-          });
-          if (usedSessionIds.has(sessionId)) {
-            // Generate new sessionId
-            const timestamp = Date.now().toString().slice(-4);
-            const randomSuffix = Math.random()
-              .toString(36)
-              .substring(2, 8)
-              .toUpperCase();
-            finalSessionId = `${sessionId}_${timestamp}_${randomSuffix}`;
-            sessionIdChanged = true;
-            sessionIdReason = `Session ID conflict detected: "${sessionId}" is already used in existing orders. Generated new unique ID to avoid duplication.`;
-          } else {
-            sessionIdReason =
-              'Session ID is available and not used in any orders';
-          }
-        } catch (error) {
-          sessionIdReason =
-            'Could not verify with Shopify orders. Using original session ID.';
-        }
-      }
-
-      // Step 1: Generate short code first (to use in filename)
-      let shortCode = this.generateShortCode();
-      let attempts = 0;
-      const maxAttempts = 10;
-
-      while (attempts < maxAttempts) {
-        const { data: existingRecord } = await this.supabase
-          .from('uploads')
-          .select('code')
-          .eq('code', shortCode)
-          .single();
-
-        if (!existingRecord) {
-          break;
-        }
-
-        shortCode = this.generateShortCode();
-        attempts++;
-      }
-
-      if (attempts >= maxAttempts) {
-        throw new HttpException(
-          'Could not generate unique code',
-          HttpStatus.INTERNAL_SERVER_ERROR,
-        );
-      }
-
-      // Step 1.5: If sessionId is provided, check for existing uploads and delete old QR code
-      if (finalSessionId) {
+        // Check if this sessionId already has an upload record
         const existingUploads =
-          await this.uploadsService.getUploadsBySession(finalSessionId);
-        for (const upload of existingUploads) {
+          await this.uploadsService.getUploadsBySession(sessionId);
+        
+        if (existingUploads.length > 0) {
+          // Use the existing code from the first upload for this session
+          existingSessionCode = existingUploads[0].code;
+          isNewSession = false;
+          sessionUpdateReason = `Updating existing session "${sessionId}" with code "${existingSessionCode}"`;
+          
           // Remove old QR code from storage if exists
-          const qrFilePath = `products/${upload.code}/qr_code.png`;
+          const qrFilePath = `products/${existingSessionCode}/qr_code.png`;
           await this.supabase.storage
             .from('customizer-uploads')
             .remove([qrFilePath]);
+        } else {
+          sessionUpdateReason = `New session "${sessionId}" created`;
+        }
+      }
+
+      // Step 1: Determine the code to use
+      let shortCode: string;
+      
+      if (existingSessionCode) {
+        // Reuse existing code for this session
+        shortCode = existingSessionCode;
+      } else {
+        // Generate new short code for new sessions
+        shortCode = this.generateShortCode();
+        let attempts = 0;
+        const maxAttempts = 10;
+
+        while (attempts < maxAttempts) {
+          const { data: existingRecord } = await this.supabase
+            .from('uploads')
+            .select('code')
+            .eq('code', shortCode)
+            .single();
+
+          if (!existingRecord) {
+            break;
+          }
+
+          shortCode = this.generateShortCode();
+          attempts++;
+        }
+
+        if (attempts >= maxAttempts) {
+          throw new HttpException(
+            'Could not generate unique code',
+            HttpStatus.INTERNAL_SERVER_ERROR,
+          );
         }
       }
 
@@ -195,19 +178,22 @@ export class ProductsController {
 
       this.logger.log(`Image uploaded: ${imageUrl}`);
 
-      // Step 4: Create upload record in database (pass the shortCode so it matches storage folder)
+      // Step 4: Create or update upload record in database
       const metadataObj = metadata ? JSON.parse(metadata) : {};
 
-      const { uploadId } = await this.uploadsService.createUpload(
+      const uploadResult = await this.uploadsService.createOrUpdateUpload(
         imageUrl,
-        finalSessionId,
+        sessionId,
         productId,
         productName,
         metadataObj,
         shortCode,
+        !isNewSession,
       );
 
-      this.logger.log(`Upload record created: ${shortCode}`);
+      this.logger.log(
+        `Upload ${isNewSession ? 'created' : 'updated'}: ${shortCode}`,
+      );
 
       // Step 5: Generate QR code with product URL
       const productUrl = `loretana.com/product/${shortCode}`;
@@ -221,18 +207,20 @@ export class ProductsController {
 
       return {
         success: true,
-        message: 'Product image uploaded and processed successfully',
+        message: isNewSession
+          ? 'Product image uploaded and processed successfully'
+          : 'Product image updated for existing session',
         code: shortCode,
         imageUrl: imageUrl,
         productUrl: productUrl,
         qrUrl: qrResult.qrUrl,
         qrFileId: qrResult.qrFileId,
-        uploadId: uploadId,
+        uploadId: uploadResult.uploadId,
         fileSize: file.size,
         uploadedAt: new Date().toISOString(),
-        sessionId: finalSessionId,
-        sessionIdChanged,
-        sessionIdReason,
+        sessionId: sessionId,
+        isNewSession: isNewSession,
+        sessionUpdateReason: sessionUpdateReason,
       };
     } catch (error) {
       const errorMessage =

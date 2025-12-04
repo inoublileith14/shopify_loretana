@@ -53,6 +53,109 @@ export class ProductUploadsService {
   }
 
   /**
+   * Create or update an upload record
+   * If isUpdate is true, updates the existing record; otherwise creates a new one
+   */
+  async createOrUpdateUpload(
+    imageUrl: string,
+    sessionId?: string,
+    productId?: string,
+    productName?: string,
+    metadata?: Record<string, any>,
+    code?: string,
+    isUpdate: boolean = false,
+  ): Promise<{ uploadId: string; qrUrl: string }> {
+    if (!this.supabase) {
+      throw new BadRequestException(
+        'Supabase service is not configured. Cannot create or update upload record.',
+      );
+    }
+
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      throw new BadRequestException(
+        'Image URL is required and must be a string',
+      );
+    }
+
+    try {
+      const finalCode = code;
+      if (!finalCode) {
+        throw new BadRequestException('Code is required');
+      }
+
+      let uploadId: string;
+
+      if (isUpdate && sessionId) {
+        // Update existing record
+        const { data: updateData, error: updateError } = await this.supabase
+          .from('uploads')
+          .update({
+            image_url: imageUrl,
+            product_id: productId,
+            product_name: productName,
+            metadata: metadata || {},
+          })
+          .eq('code', finalCode)
+          .select('id')
+          .single();
+
+        if (updateError) {
+          throw new BadRequestException(
+            `Failed to update upload record: ${updateError.message}`,
+          );
+        }
+
+        uploadId = updateData.id;
+        this.logger.log(
+          `Upload record updated: Code=${finalCode}, SessionId=${sessionId}`,
+        );
+      } else {
+        // Create new record
+        const { data: insertData, error: insertError } = await this.supabase
+          .from('uploads')
+          .insert({
+            code: finalCode,
+            session_id: sessionId,
+            image_url: imageUrl,
+            product_id: productId,
+            product_name: productName,
+            metadata: metadata || {},
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          throw new BadRequestException(
+            `Failed to create upload record: ${insertError.message}`,
+          );
+        }
+
+        uploadId = insertData.id;
+        this.logger.log(
+          `Upload record created: Code=${finalCode}, SessionId=${sessionId}`,
+        );
+      }
+
+      const qrUrl = `loretana.com/view/${finalCode}`;
+
+      return {
+        uploadId,
+        qrUrl,
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Failed to create or update upload record';
+      this.logger.error(`Error creating/updating upload record:`, error);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(errorMessage);
+    }
+  }
+
+  /**
    * Create an upload record and return the short code
    */
   async createUpload(

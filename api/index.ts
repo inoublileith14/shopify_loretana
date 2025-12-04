@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { VercelRequest, VercelResponse } from '@vercel/node';
+import * as path from 'path';
 
 let app: any;
 
@@ -41,27 +42,34 @@ export default async (req: VercelRequest, res: VercelResponse) => {
 
   if (!app) {
     try {
-        let moduleImport: any = null;
+      let moduleImport: any = null;
 
-        // Import from the compiled dist output
+      const candidates = [
+        path.join(process.cwd(), 'dist', 'app.module.js'),
+        path.join(__dirname, '..', 'dist', 'app.module.js'),
+        path.join(__dirname, 'dist', 'app.module.js'),
+      ];
+
+      for (const p of candidates) {
         try {
-          // @ts-ignore - runtime-only dynamic import
-          moduleImport = await import('./dist/app.module.js');
-        } catch (err) {
-          console.error('Failed to import AppModule from ./dist:', err);
-          try {
-            // Fallback: try from ../dist
-            moduleImport = await import('../dist/app.module.js');
-          } catch (fallbackErr) {
-            console.error('Failed to import AppModule from ../dist:', fallbackErr);
-            throw new Error(
-              'Cannot find compiled AppModule. Ensure "npm run build" was executed before deployment. ' +
-              'Error: ' + (err instanceof Error ? err.message : String(err))
-            );
-          }
+          // Use require to resolve CommonJS-built files reliably at runtime
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          moduleImport = require(p);
+          console.log('Loaded AppModule from', p);
+          break;
+        } catch (e) {
+          // continue trying other paths
         }
+      }
 
-        const { AppModule } = moduleImport;
+      if (!moduleImport) {
+        const msg =
+          'Cannot find compiled AppModule. Ensure "npm run build" was executed before deployment and that the `dist` folder is included.';
+        console.error(msg);
+        throw new Error(msg);
+      }
+
+      const { AppModule } = moduleImport;
       app = await NestFactory.create(AppModule);
       await app.init();
     } catch (error) {

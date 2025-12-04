@@ -86,8 +86,23 @@ export class ProductUploadsService {
       let uploadId: string;
 
       if (isUpdate && sessionId) {
-        // Update existing record
-        const { data: updateData, error: updateError } = await this.supabase
+        // First, fetch the existing record to get its ID
+        const { data: existingRecord, error: fetchError } = await this.supabase
+          .from('uploads')
+          .select('id')
+          .eq('code', finalCode)
+          .single();
+
+        if (fetchError || !existingRecord) {
+          throw new BadRequestException(
+            `Failed to find upload record for code: ${finalCode}`,
+          );
+        }
+
+        uploadId = existingRecord.id;
+
+        // Now update the record
+        const { error: updateError } = await this.supabase
           .from('uploads')
           .update({
             image_url: imageUrl,
@@ -95,9 +110,7 @@ export class ProductUploadsService {
             product_name: productName,
             metadata: metadata || {},
           })
-          .eq('code', finalCode)
-          .select('id')
-          .single();
+          .eq('code', finalCode);
 
         if (updateError) {
           throw new BadRequestException(
@@ -105,7 +118,6 @@ export class ProductUploadsService {
           );
         }
 
-        uploadId = updateData.id;
         this.logger.log(
           `Upload record updated: Code=${finalCode}, SessionId=${sessionId}`,
         );

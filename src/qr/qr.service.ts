@@ -136,4 +136,58 @@ export class QrService {
       throw new BadRequestException(errorMessage);
     }
   }
+
+  /**
+   * Retrieve QR code image buffer for a given sessionId
+   */
+  async getQrCodeBySession(
+    sessionId: string,
+  ): Promise<{ buffer: Buffer; path: string }> {
+    if (!this.supabase) {
+      throw new BadRequestException(
+        'Supabase service is not configured. Cannot retrieve QR code.',
+      );
+    }
+
+    if (!sessionId || sessionId.trim() === '') {
+      throw new BadRequestException('Session ID is required');
+    }
+
+    try {
+      const folderPath = `customizer/${sessionId}`;
+      const qrFileName = 'qr_code.png';
+      const qrFilePath = `${folderPath}/${qrFileName}`;
+
+      this.logger.log(`Retrieving QR code for session: ${sessionId}`);
+
+      // Download QR code from Supabase
+      const { data, error } = await this.supabase.storage
+        .from('customizer-uploads')
+        .download(qrFilePath);
+
+      if (error || !data) {
+        throw new BadRequestException(
+          `QR code not found for session ${sessionId}: ${error?.message || 'No data returned'}`,
+        );
+      }
+
+      const buffer = await data.arrayBuffer();
+      this.logger.log(
+        `Successfully retrieved QR code for session: ${sessionId}`,
+      );
+
+      return { buffer: Buffer.from(buffer), path: qrFilePath };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to retrieve QR code';
+      this.logger.error(
+        `Failed to retrieve QR code for session ${sessionId}:`,
+        error,
+      );
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(errorMessage);
+    }
+  }
 }

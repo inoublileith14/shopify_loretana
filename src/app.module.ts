@@ -6,12 +6,14 @@ import { EmailModule } from './email/email.module';
 import { CustomizerModule } from './customizer/customizer.module';
 import { ShopifyModule } from './shopify/shopify.module';
 import { ProductUploadsModule } from './product-uploads/product-uploads.module';
+import { GenerateModule } from './generate/generate.module';
 
 @Module({
   imports: [
     QrModule,
     EmailModule,
     CustomizerModule,
+    GenerateModule,
     ShopifyModule,
     ProductUploadsModule,
   ],

@@ -243,4 +243,107 @@ export class EmailController {
       );
     }
   }
+
+  @Post('submit-return')
+  @UseInterceptors(
+    FilesInterceptor('attachments', 10, {
+      limits: { fileSize: EmailController.PER_FILE_LIMIT },
+    }),
+  )
+  async submitReturnForm(
+    @Body() body: any,
+    @UploadedFiles() files: Express.Multer.File[] = [],
+  ) {
+    try {
+      this.logger.log(`submit-return received ${files.length} attachment(s)`);
+
+      // Extract expected form fields from body
+      const name = body.name || body.fullName || body['NAME'] || '';
+      const email = body.email || body.emailAddress || '';
+      const orderNumber = body.orderNumber || body.order || body['ORDER NUMBER'] || '';
+      const productCodesReturned = body.productCodesReturned || body.product_codes || body['PRODUCT CODE(S) OF RETURNED GOODS'] || '';
+      const productCodeExchange = body.productCodeExchange || body.newProductCode || '';
+      const additionalInfo = body.additionalInfo || body.message || body['ADDITIONAL INFORMATION'] || '';
+      const termsAccepted = body.termsAccepted || body.terms || body.acceptedTerms || false;
+
+      // Map uploaded files to attachment format
+      const attachments: Array<{
+        filename: string;
+        content?: Buffer;
+        contentType?: string;
+        path?: string;
+      }> = files.map((file: Express.Multer.File) => ({
+        filename: file.originalname,
+        content: file.buffer,
+        contentType: file.mimetype,
+      }));
+
+      // Compute total attachments size
+      let totalBytes = 0;
+      for (const f of files) {
+        totalBytes += f.size || 0;
+      }
+
+      if (totalBytes > EmailController.TOTAL_ATTACHMENTS_LIMIT) {
+        return {
+          success: false,
+          message: `Total attachments size exceeds limit (${totalBytes} bytes)`,
+        };
+      }
+
+      // Build HTML body summarizing form
+      const htmlParts: string[] = [];
+      htmlParts.push(`<h2>Return / Exchange Request</h2>`);
+      htmlParts.push(`<p><strong>Name:</strong> ${this.escapeHtml(name)}</p>`);
+      htmlParts.push(`<p><strong>Email:</strong> ${this.escapeHtml(email)}</p>`);
+      htmlParts.push(`<p><strong>Order Number:</strong> ${this.escapeHtml(orderNumber)}</p>`);
+      htmlParts.push(`<p><strong>Product Code(s) of Returned Goods:</strong> ${this.escapeHtml(productCodesReturned)}</p>`);
+      if (productCodeExchange) htmlParts.push(`<p><strong>Product Code of New Goods (Exchange):</strong> ${this.escapeHtml(productCodeExchange)}</p>`);
+      htmlParts.push(`<p><strong>Additional Information:</strong></p><div style="background:#f9f9f9;padding:10px;border-radius:4px;border:1px solid #e5e5e5;white-space:pre-wrap;">${this.escapeHtml(additionalInfo)}</div>`);
+      htmlParts.push(`<p><strong>Terms Accepted:</strong> ${termsAccepted ? 'Yes' : 'No'}</p>`);
+
+      if (files && files.length > 0) {
+        htmlParts.push(`<h3>Attachments (${files.length})</h3><ul>`);
+        for (const f of files) {
+          htmlParts.push(`<li>${this.escapeHtml(f.originalname)} (${f.size} bytes)</li>`);
+        }
+        htmlParts.push(`</ul>`);
+      }
+
+      const html = htmlParts.join('\n');
+
+      // Send to configured recipient or fallback
+      const to = process.env.RETURN_REQUEST_TO || process.env.CONTACT_EMAIL || 'contact@loretana.com';
+      const subject = `Return/Exchange request from ${name || email || 'customer'}`;
+
+      // Use user's email as reply-to by passing senderEmail
+      const result = await this.emailService.sendEmail(
+        to,
+        subject,
+        `Return/Exchange request from ${name || email || 'customer'}\n\n${additionalInfo || ''}`,
+        html,
+        attachments,
+        email || undefined,
+      );
+
+      return { success: true, messageId: result.messageId };
+    } catch (error) {
+      this.logger.error('submit-return failed', error);
+      throw new HttpException(
+        `Failed to submit return request: ${error instanceof Error ? error.message : 'Unknown'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // simple HTML escaper to avoid injection in email content
+  private escapeHtml(input: any): string {
+    if (input === undefined || input === null) return '';
+    return String(input)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
 }

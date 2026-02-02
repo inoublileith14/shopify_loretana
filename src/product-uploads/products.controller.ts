@@ -10,6 +10,7 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductUploadsService } from './product-uploads.service';
@@ -269,6 +270,69 @@ export class ProductsController {
       const errorMessage =
         error instanceof Error ? error.message : 'Failed to retrieve product';
       this.logger.error(`Product retrieval error: ${errorMessage}`, error);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(errorMessage, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  /**
+   * Get QR code by sessionId - stream QR image bytes directly
+   */
+  @Get('session/:sessionId')
+  async getProductBySessionId(
+    @Param('sessionId') sessionId: string,
+    @Res() res: any,
+  ) {
+    try {
+      if (!sessionId) {
+        throw new HttpException(
+          'Session ID parameter is required',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      if (!this.supabase) {
+        throw new HttpException(
+          'Supabase service is not configured',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      const uploadRecords = await this.uploadsService.getUploadsBySession(sessionId);
+
+      if (!uploadRecords || uploadRecords.length === 0) {
+        throw new HttpException('Product not found for this session', HttpStatus.NOT_FOUND);
+      }
+
+      // Get the first (most recent) upload for this session
+      const uploadRecord = uploadRecords[0];
+      const filePath = `customizer/${sessionId}/qr_code.png`;
+
+      // Download QR code image bytes from Supabase Storage
+      const { data, error } = await this.supabase.storage
+        .from('customizer-uploads')
+        .download(filePath);
+
+      if (error || !data) {
+        throw new HttpException(
+          `Failed to download QR code: ${error?.message || 'Unknown error'}`,
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // Set response headers and stream the QR code image
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Content-Disposition', `inline; filename="qr_code_${uploadRecord.code}.png"`);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.send(Buffer.from(await data.arrayBuffer()));
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to retrieve QR code';
+      this.logger.error(`QR code retrieval error: ${errorMessage}`, error);
 
       if (error instanceof HttpException) {
         throw error;

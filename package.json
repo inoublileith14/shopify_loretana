@@ -18,6 +18,9 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json"
+    ,
+    "cleanup:trigger": "curl -X POST \"$CLEANUP_URL\" -H \"x-cleanup-secret: $CLEANUP_SECRET\" -H \"Content-Type: application/json\" -d '{\"graceDays\":7}'",
+    "cleanup:force": "curl -X POST \"$CLEANUP_URL\" -H \"x-cleanup-secret: $CLEANUP_SECRET\" -H \"Content-Type: application/json\" -d '{\"force\":true}'"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

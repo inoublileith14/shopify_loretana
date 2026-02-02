@@ -1,7 +1,8 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
 import sharp from 'sharp';
 import { ShopifyService } from '../shopify/shopify.service';
+import { ProductUploadsService } from '../product-uploads/product-uploads.service';
 
 interface CustomizationData {
   x: number;
@@ -15,7 +16,10 @@ export class CustomizerService {
   private readonly logger = new Logger(CustomizerService.name);
   private supabase: any;
 
-  constructor(private readonly shopifyService: ShopifyService) {
+  constructor(
+    private readonly shopifyService: ShopifyService,
+    private readonly productUploadsService: ProductUploadsService,
+  ) {
     this.initializeSupabase();
   }
 
@@ -179,38 +183,46 @@ export class CustomizerService {
           throw new BadRequestException(`Invalid shape: ${shape}`);
       }
 
-      // Render the mask SVG to a buffer with transparency
+      // Render the mask SVG to a PNG with alpha channel (white shape on transparent background)
       const maskImage = await sharp(Buffer.from(maskSvg))
         .resize(width, height, { fit: 'fill', position: 'center' })
+        .ensureAlpha()
         .png()
         .toBuffer();
 
-      // Create white background
-      const whiteBg = await sharp({
+      // Composite: apply mask as alpha to the resized image (creates transparent areas where mask is black)
+      const maskedImage = await sharp(resizedImage)
+        .composite([
+          {
+            input: maskImage,
+            top: 0,
+            left: 0,
+            blend: 'dest-in', // Use mask as alpha channel
+          },
+        ])
+        .png()
+        .toBuffer();
+
+      // Create black background
+      const blackBg = await sharp({
         create: {
           width: width,
           height: height,
-          channels: 3,
-          background: { r: 255, g: 255, b: 255 },
+          channels: 4,
+          background: { r: 0, g: 0, b: 0, alpha: 1 },
         },
       })
         .png()
         .toBuffer();
 
-      // Composite: white background + resized image with mask applied
-      const final = await sharp(whiteBg)
+      // Composite masked image onto black background
+      const final = await sharp(blackBg)
         .composite([
           {
-            input: resizedImage,
+            input: maskedImage,
             top: 0,
             left: 0,
             blend: 'over',
-          },
-          {
-            input: maskImage,
-            top: 0,
-            left: 0,
-            blend: 'dest-in', // Apply mask using dest-in blend mode
           },
         ])
         .png()
@@ -465,9 +477,12 @@ export class CustomizerService {
 
       // Transform and apply shape mask
       const metadata = await sharp(file.buffer).metadata();
+
+      // The storefront now sends center-based percentages (0..100 where 50 === center).
+      // Use the provided `customizationData` directly when transforming the image.
       const transformedImage = await this.transformImage(
         file.buffer,
-        customizationData,
+        { x: customizationData.x, y: customizationData.y, zoom: customizationData.zoom, shape: customizationData.shape } as any,
         500,
         500,
       );
@@ -538,6 +553,308 @@ export class CustomizerService {
         throw error;
       }
       throw new BadRequestException('Failed to upload customized image');
+    }
+  }
+
+  /**
+   * Cleanup orphaned session-product folders older than `graceDays` and not referenced in any Shopify orders.
+   * - Lists folders under `customizer/`
+   * - For each folder, determines last-modified timestamp from contained files
+   * - If older than grace period and not referenced in orders, deletes all files in that folder
+   */
+  async cleanupOrphanedSessions(
+    graceDays: number = 7,
+    options?: { force?: boolean },
+  ): Promise<{
+    deletedFolders: string[];
+    skippedFolders: string[];
+    errors: Array<{ folder: string; error: string }>;
+  }> {
+    if (!this.supabase) {
+      throw new BadRequestException(
+        'Supabase service is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.',
+      );
+    }
+
+    const deletedFolders: string[] = [];
+    const skippedFolders: string[] = [];
+    const errors: Array<{ folder: string; error: string }> = [];
+
+    try {
+      // List top-level entries under customizer/ (should be per-session folders)
+      const { data: entries, error: listRootError } = await this.supabase.storage
+        .from('customizer-uploads')
+        .list('customizer');
+
+      if (listRootError) {
+        throw new Error(listRootError.message || 'Failed to list customizer root');
+      }
+
+      const ordersResponse = await this.shopifyService.getOrders(250, 'any');
+      const existingOrders = ordersResponse.orders || [];
+
+      const now = Date.now();
+      const graceMs = graceDays * 24 * 60 * 60 * 1000;
+
+      if (!entries || entries.length === 0) {
+        return { deletedFolders, skippedFolders, errors };
+      }
+
+      const forceAll = !!options?.force;
+
+      if (forceAll) {
+        this.logger.warn('Force delete enabled: removing all folders under customizer');
+      }
+
+      // entries may represent folders (by name). Iterate each folder name
+      for (const entry of entries) {
+        const folderName = entry.name;
+        const folderPath = `customizer/${folderName}`;
+
+        try {
+          const { data: files, error: listFilesError } = await this.supabase.storage
+            .from('customizer-uploads')
+            .list(folderPath);
+
+          if (listFilesError) {
+            errors.push({ folder: folderPath, error: listFilesError.message });
+            continue;
+          }
+
+          if (!files || files.length === 0) {
+            // Empty folder - delete (force and non-force both delete empty)
+            const { error: removeError } = await this.supabase.storage
+              .from('customizer-uploads')
+              .remove([folderPath]);
+
+            if (removeError) {
+              errors.push({ folder: folderPath, error: removeError.message });
+            } else {
+              deletedFolders.push(folderPath);
+            }
+            continue;
+          }
+
+          // Determine last modified across files
+          let latestTs = 0;
+          for (const f of files) {
+            const tsStr = f.updated_at || f.last_modified || f.created_at || f.timeCreated || f.metadata?.updated_at;
+            if (tsStr) {
+              const parsed = Date.parse(tsStr as string);
+              if (!Number.isNaN(parsed)) {
+                latestTs = Math.max(latestTs, parsed);
+              }
+            }
+          }
+
+          // If forceAll is true, delete without checking timestamps or orders
+          if (forceAll) {
+            const filePaths = files.map((f: any) => `${folderPath}/${f.name}`);
+            const { error: deleteError } = await this.supabase.storage
+              .from('customizer-uploads')
+              .remove(filePaths);
+
+            if (deleteError) {
+              errors.push({ folder: folderPath, error: deleteError.message });
+              continue;
+            }
+
+            deletedFolders.push(folderPath);
+            continue;
+          }
+
+          if (latestTs === 0) {
+            // If we couldn't determine timestamps, skip to be safe
+            skippedFolders.push(folderPath);
+            continue;
+          }
+
+          const ageMs = now - latestTs;
+          if (ageMs <= graceMs) {
+            skippedFolders.push(folderPath);
+            continue;
+          }
+
+          // Extract sessionId from folder name (format: sessionId-productId or sessionId)
+          const sessionId = folderName.split('-')[0];
+
+          // Check orders for any reference to sessionId
+          const isReferenced = existingOrders.some((order: any) => {
+            try {
+              const serialized = JSON.stringify(order);
+              return serialized.includes(sessionId);
+            } catch (e) {
+              return false;
+            }
+          });
+
+          if (isReferenced) {
+            skippedFolders.push(folderPath);
+            continue;
+          }
+
+          // Delete all files in the folder
+          const filePaths = files.map((f: any) => `${folderPath}/${f.name}`);
+          const { error: deleteError } = await this.supabase.storage
+            .from('customizer-uploads')
+            .remove(filePaths);
+
+          if (deleteError) {
+            errors.push({ folder: folderPath, error: deleteError.message });
+            continue;
+          }
+
+          deletedFolders.push(folderPath);
+        } catch (innerErr) {
+          errors.push({ folder: folderPath, error: innerErr?.message || String(innerErr) });
+        }
+      }
+
+      return { deletedFolders, skippedFolders, errors };
+    } catch (error) {
+      this.logger.error('Failed to run cleanup:', error);
+      throw new BadRequestException('Cleanup job failed');
+    }
+  }
+
+  /**
+   * Delete all customizer folders whose sessionId is NOT referenced in any Shopify orders.
+   * Also deletes any product upload DB records and product storage files that reference those sessions.
+   */
+  async deleteSessionsNotInOrders(options?: { force?: boolean }): Promise<{
+    deletedFolders: string[];
+    deletedUploads: string[];
+    skippedFolders: string[];
+    errors: Array<{ folder?: string; error: string }>;
+  }> {
+    if (!this.supabase) {
+      throw new BadRequestException(
+        'Supabase service is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.',
+      );
+    }
+
+    const deletedFolders: string[] = [];
+    const deletedUploads: string[] = [];
+    const skippedFolders: string[] = [];
+    const errors: Array<{ folder?: string; error: string }> = [];
+
+    try {
+      const { data: entries, error: listRootError } = await this.supabase.storage
+        .from('customizer-uploads')
+        .list('customizer');
+
+      if (listRootError) {
+        throw new Error(listRootError.message || 'Failed to list customizer root');
+      }
+
+      if (!entries || entries.length === 0) {
+        return { deletedFolders, deletedUploads, skippedFolders, errors };
+      }
+
+      const ordersResponse = await this.shopifyService.getOrders(250, 'any');
+      const existingOrders = ordersResponse.orders || [];
+
+      const forceAll = !!options?.force;
+
+      for (const entry of entries) {
+        const folderName = entry.name;
+        const folderPath = `customizer/${folderName}`;
+
+        try {
+          // Extract base sessionId (prefix before '-')
+          const sessionId = folderName.split('-')[0];
+
+          if (!sessionId) {
+            skippedFolders.push(folderPath);
+            continue;
+          }
+
+          // Determine whether sessionId appears in any order
+          const isReferenced = existingOrders.some((order: any) => {
+            try {
+              const serialized = JSON.stringify(order);
+              return serialized.includes(sessionId);
+            } catch (e) {
+              return false;
+            }
+          });
+
+          if (isReferenced && !forceAll) {
+            skippedFolders.push(folderPath);
+            continue;
+          }
+
+          // List files in the folder
+          const { data: files, error: listFilesError } = await this.supabase.storage
+            .from('customizer-uploads')
+            .list(folderPath);
+
+          if (listFilesError) {
+            errors.push({ folder: folderPath, error: listFilesError.message });
+            continue;
+          }
+
+          if (!files || files.length === 0) {
+            // remove empty folder if possible
+            const { error: removeError } = await this.supabase.storage
+              .from('customizer-uploads')
+              .remove([folderPath]);
+
+            if (removeError) {
+              errors.push({ folder: folderPath, error: removeError.message });
+            } else {
+              deletedFolders.push(folderPath);
+            }
+            continue;
+          }
+
+          // Delete files
+          const filePaths = files.map((f: any) => `${folderPath}/${f.name}`);
+          const { error: deleteError } = await this.supabase.storage
+            .from('customizer-uploads')
+            .remove(filePaths);
+
+          if (deleteError) {
+            errors.push({ folder: folderPath, error: deleteError.message });
+            continue;
+          }
+
+          deletedFolders.push(folderPath);
+
+          // Also delete product upload records that reference this sessionId
+          try {
+            const uploads = await this.productUploadsService.getUploadsBySession(sessionId);
+            for (const u of uploads || []) {
+              try {
+                // Attempt to remove storage files for the product code
+                if (this.supabase) {
+                  await this.supabase.storage
+                    .from('customizer-uploads')
+                    .remove([
+                      `products/${u.code}/${u.code}.png`,
+                      `products/${u.code}/qr_code.png`,
+                    ]);
+                }
+
+                await this.productUploadsService.deleteUpload(u.code);
+                deletedUploads.push(u.code);
+              } catch (innerDelErr) {
+                errors.push({ folder: `product:${u.code}`, error: innerDelErr?.message || String(innerDelErr) });
+              }
+            }
+          } catch (puErr) {
+            // Log but continue
+            this.logger.warn(`Failed to remove product uploads for session ${sessionId}:`, puErr);
+          }
+        } catch (innerErr) {
+          errors.push({ folder: folderPath, error: innerErr?.message || String(innerErr) });
+        }
+      }
+
+      return { deletedFolders, deletedUploads, skippedFolders, errors };
+    } catch (error) {
+      this.logger.error('Failed to delete sessions not in orders:', error);
+      throw new BadRequestException('Failed to delete sessions not in orders');
     }
   }
 
@@ -621,5 +938,296 @@ export class CustomizerService {
       sessionId: sessionId,
       folderPath: `customizer/${sessionId}`,
     };
+  }
+
+  /**
+   * Return shaped image public URLs for a sessionId.
+   * Finds folders named `sessionId` or `sessionId-<productId>` and returns any pngs except `original.png`.
+   */
+  async getShapesBySession(sessionId: string): Promise<{
+    sessionId: string;
+    folders: Array<{
+      folder: string;
+      shapedFiles: Array<{ name: string; publicUrl: string }>;
+    }>;
+  }> {
+    if (!sessionId || sessionId.trim() === '') {
+      throw new BadRequestException('Session ID is required');
+    }
+
+    if (!this.supabase) {
+      throw new BadRequestException(
+        'Supabase service is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.',
+      );
+    }
+
+    try {
+      const { data: entries, error: listRootError } = await this.supabase.storage
+        .from('customizer-uploads')
+        .list('customizer');
+
+      if (listRootError) {
+        throw new Error(listRootError.message || 'Failed to list customizer root');
+      }
+
+      const matched = (entries || []).filter((e: any) => {
+        if (!e || !e.name) return false;
+        return e.name === sessionId || e.name.startsWith(`${sessionId}-`);
+      });
+
+      const folders: Array<any> = [];
+
+      for (const entry of matched) {
+        const folderName = entry.name;
+        const folderPath = `customizer/${folderName}`;
+
+        const { data: files, error: listFilesError } = await this.supabase.storage
+          .from('customizer-uploads')
+          .list(folderPath);
+
+        if (listFilesError) {
+          // skip folder on error
+          continue;
+        }
+
+        const shapedFiles: Array<{ name: string; publicUrl: string }> = [];
+
+        for (const f of files || []) {
+          if (!f || !f.name) continue;
+          if (f.name === 'original.png') continue;
+          if (!f.name.toLowerCase().endsWith('.png')) continue;
+
+          const filePath = `${folderPath}/${f.name}`;
+          const { data: urlData } = this.supabase.storage
+            .from('customizer-uploads')
+            .getPublicUrl(filePath);
+
+          const baseUrl = urlData?.publicUrl || '';
+          const cacheBuster = `v=${Date.now()}_${Math.random().toString(36).substring(2,8)}`;
+          const publicUrl = baseUrl ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${cacheBuster}` : '';
+
+          if (publicUrl) {
+            shapedFiles.push({ name: f.name, publicUrl });
+          }
+        }
+
+        folders.push({ folder: folderPath, shapedFiles });
+      }
+
+      return { sessionId, folders };
+    } catch (error) {
+      this.logger.error(`Failed to fetch shapes for session ${sessionId}:`, error);
+      throw new BadRequestException('Failed to fetch shaped images');
+    }
+  }
+
+  /**
+   * Return the single most-recent shaped image public URL for a sessionId.
+   * Chooses the latest shaped PNG (excluding original.png) across folders matching sessionId.
+   */
+  async getLatestShapeBySession(
+    sessionId: string,
+    options?: { shape?: string; productId?: string },
+  ): Promise<{
+    sessionId: string;
+    folder: string;
+    name: string;
+    publicUrl: string;
+    timestamp: number;
+  }> {
+    if (!sessionId || sessionId.trim() === '') {
+      throw new BadRequestException('Session ID is required');
+    }
+
+    if (!this.supabase) {
+      throw new BadRequestException(
+        'Supabase service is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.',
+      );
+    }
+
+    try {
+      const { data: entries, error: listRootError } = await this.supabase.storage
+        .from('customizer-uploads')
+        .list('customizer');
+
+      if (listRootError) {
+        throw new Error(listRootError.message || 'Failed to list customizer root');
+      }
+
+      const matched = (entries || []).filter((e: any) => {
+        if (!e || !e.name) return false;
+        return e.name === sessionId || e.name.startsWith(`${sessionId}-`);
+      });
+
+      // If productId specified, narrow to the specific folder if present
+      const productId = options?.productId;
+      let filteredMatched = matched;
+      if (productId) {
+        const exact = `${sessionId}-${productId}`;
+        filteredMatched = matched.filter((e: any) => e.name === exact || e.name === sessionId);
+      }
+
+      let best: { folder: string; name: string; publicUrl: string; timestamp: number } | null = null;
+
+      const knownShapes = new Set(['circle', 'heart', 'rectangle']);
+
+      for (const entry of filteredMatched) {
+        const folderName = entry.name;
+        const folderPath = `customizer/${folderName}`;
+
+        const { data: files, error: listFilesError } = await this.supabase.storage
+          .from('customizer-uploads')
+          .list(folderPath);
+
+        if (listFilesError || !files) {
+          continue;
+        }
+
+        for (const f of files) {
+          if (!f || !f.name) continue;
+          const lower = f.name.toLowerCase();
+          if (lower === 'original.png') continue;
+          if (!lower.endsWith('.png')) continue;
+
+          // extract shape prefix from filename (before '_' or '-')
+          const base = lower.split('.')[0];
+          const m = base.match(/^([a-z]+)[_\-]?.*/i);
+          const candidate = m ? m[1].toLowerCase() : '';
+          if (!knownShapes.has(candidate)) {
+            // skip non-shape files (e.g., qr_code.png)
+            continue;
+          }
+
+          // If a specific shape was requested, enforce it
+          if (options?.shape && options.shape.toLowerCase() !== candidate) {
+            continue;
+          }
+
+          // Determine timestamp: prefer metadata fields from Supabase response
+          let ts = 0;
+          const possible = f.updated_at || f.last_modified || f.created_at || f.timeCreated || f.metadata?.updated_at;
+          if (possible) {
+            const parsed = Date.parse(possible as string);
+            if (!Number.isNaN(parsed)) ts = parsed;
+          }
+
+          // Fallback: try to extract digits from filename (common shaped filename uses <shape>_<timestamp>.png)
+          if (ts === 0) {
+            const m = f.name.match(/(\d{10,})/);
+            if (m) {
+              const n = Number(m[1]);
+              if (!Number.isNaN(n)) {
+                // If looks like seconds, convert to ms; if long, assume ms
+                ts = n < 1e12 ? n * 1000 : n;
+              }
+            }
+          }
+
+          // If still zero, set to epoch 0 so it won't be chosen over anything with a timestamp
+
+          const filePath = `${folderPath}/${f.name}`;
+          const { data: urlData } = this.supabase.storage
+            .from('customizer-uploads')
+            .getPublicUrl(filePath);
+
+          const baseUrl = urlData?.publicUrl || '';
+          if (!baseUrl) continue;
+          const cacheBuster = `v=${Date.now()}_${Math.random().toString(36).substring(2,8)}`;
+          const publicUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${cacheBuster}`;
+
+          if (!best || ts > best.timestamp) {
+            best = { folder: folderPath, name: f.name, publicUrl, timestamp: ts };
+          }
+        }
+      }
+
+      if (!best) {
+        throw new NotFoundException('No shaped image found for this session');
+      }
+
+      return { sessionId, folder: best.folder, name: best.name, publicUrl: best.publicUrl, timestamp: best.timestamp };
+    } catch (error) {
+      this.logger.error(`Failed to fetch latest shape for session ${sessionId}:`, error);
+      if (error instanceof NotFoundException) throw error;
+      throw new BadRequestException('Failed to fetch shaped image');
+    }
+  }
+
+  /**
+   * Return the set of shape types present for a sessionId.
+   * Parses shaped filenames (expected format: <shape>[_|-]<timestamp>.png) and returns known shapes.
+   */
+  async getShapeTypesBySession(sessionId: string): Promise<{
+    sessionId: string;
+    shapes: string[];
+    folders: Array<{ folder: string; shapes: string[] }>;
+  }> {
+    if (!sessionId || sessionId.trim() === '') {
+      throw new BadRequestException('Session ID is required');
+    }
+
+    if (!this.supabase) {
+      throw new BadRequestException(
+        'Supabase service is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.',
+      );
+    }
+
+    const knownShapes = new Set(['circle', 'heart', 'rectangle']);
+    const foundShapes = new Set<string>();
+    const folders: Array<{ folder: string; shapes: string[] }> = [];
+
+    try {
+      const { data: entries, error: listRootError } = await this.supabase.storage
+        .from('customizer-uploads')
+        .list('customizer');
+
+      if (listRootError) {
+        throw new Error(listRootError.message || 'Failed to list customizer root');
+      }
+
+      const matched = (entries || []).filter((e: any) => {
+        if (!e || !e.name) return false;
+        return e.name === sessionId || e.name.startsWith(`${sessionId}-`);
+      });
+
+      for (const entry of matched) {
+        const folderName = entry.name;
+        const folderPath = `customizer/${folderName}`;
+
+        const { data: files, error: listFilesError } = await this.supabase.storage
+          .from('customizer-uploads')
+          .list(folderPath);
+
+        if (listFilesError || !files) {
+          continue;
+        }
+
+        const shapesInFolder = new Set<string>();
+
+        for (const f of files) {
+          if (!f || !f.name) continue;
+          const name = f.name.toLowerCase();
+          if (name === 'original.png') continue;
+          if (!name.endsWith('.png')) continue;
+
+          // extract segment before first underscore or dash
+          const base = name.split('.')[0];
+          const m = base.match(/^([a-z]+)[_\-]?.*/i);
+          if (!m) continue;
+          const candidate = m[1].toLowerCase();
+          if (knownShapes.has(candidate)) {
+            shapesInFolder.add(candidate);
+            foundShapes.add(candidate);
+          }
+        }
+
+        folders.push({ folder: folderPath, shapes: Array.from(shapesInFolder) });
+      }
+
+      return { sessionId, shapes: Array.from(foundShapes), folders };
+    } catch (error) {
+      this.logger.error(`Failed to fetch shape types for session ${sessionId}:`, error);
+      throw new BadRequestException('Failed to fetch shape types');
+    }
   }
 }

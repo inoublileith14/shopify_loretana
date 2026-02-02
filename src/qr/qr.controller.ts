@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Param,
   Query,
   Res,
   HttpException,
@@ -153,6 +154,42 @@ export class QrController {
       const errorMessage =
         error instanceof Error ? error.message : 'Failed to save QR code';
       this.logger.error(`QR save error: ${errorMessage}`, error);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(errorMessage, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  /**
+   * Retrieve QR code image by sessionId
+   * GET /qr/:sessionId
+   * Returns the QR code image bytes (PNG)
+   */
+  @Get(':sessionId')
+  async getQrBySession(@Param('sessionId') sessionId: string, @Res() res: Response) {
+    try {
+      if (!sessionId || typeof sessionId !== 'string') {
+        throw new HttpException(
+          'Session ID is required and must be a valid string',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      this.logger.log(`QR retrieval request for session: ${sessionId}`);
+
+      const result = await this.qrService.getQrCodeBySession(sessionId);
+
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Content-Length', result.buffer.length.toString());
+      return res.send(result.buffer);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to retrieve QR code';
+      this.logger.error(`QR retrieval error: ${errorMessage}`, error);
 
       if (error instanceof HttpException) {
         throw error;
